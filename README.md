@@ -4,6 +4,46 @@ This guide provides a quick and effective setup for deploying models using NVIDI
 
 ---
 
+
+flowchart TD
+  subgraph CLIENT["CLIENT"]
+    A["User Uploads Images via FastAPI"]
+    B["FastAPI reads image bytes"]
+    C["read_and_pad_images → NumPy array"]
+    D["gRPC call to Triton InferenceServer: ensemble_model"]
+  end
+
+  subgraph subGraph1["TRITON SERVER"]
+    E["Ensemble Model receives RAW_IMAGE"]
+    F1["Step 1: Preprocessor Model"]
+  end
+
+  subgraph subGraph2["TRITON PREPROCESSOR - Python Backend"]
+    G1["Decode JPEG with OpenCV"]
+    H1["Convert BGR → RGB → Torch Tensor"]
+    I1["Apply transforms: Resize → ToImage → Normalize"]
+    J1["Move to CPU → Convert to NumPy"]
+    K1["Output: PREPROCESSED_IMAGE"]
+  end
+
+  subgraph subGraph3["CLASSIFIER - TorchScript"]
+    F2["Step 2: Classifier Model"]
+    G2["Run forward pass"]
+    H2["Generate prediction"]
+  end
+
+  subgraph CLIENT_RESPONSE["CLIENT_RESPONSE"]
+    I["Return prediction to FastAPI"]
+    J["FastAPI sends JSON response to user"]
+  end
+
+  A --> B --> C --> D
+  D --> E --> F1
+  F1 --> G1 --> H1 --> I1 --> J1 --> K1 --> F2
+  F2 --> G2 --> H2 --> I --> J
+
+
+
 ## 🚀 Quick Start
 
 

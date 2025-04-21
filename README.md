@@ -4,7 +4,7 @@ This guide provides a quick and effective setup for deploying models using NVIDI
 
 ---
 
-
+```mermaid
 flowchart TD
   subgraph CLIENT["CLIENT"]
     A["User Uploads Images via FastAPI"]
@@ -41,7 +41,7 @@ flowchart TD
   D --> E --> F1
   F1 --> G1 --> H1 --> I1 --> J1 --> K1 --> F2
   F2 --> G2 --> H2 --> I --> J
-
+```
 
 
 ## 🚀 Quick Start

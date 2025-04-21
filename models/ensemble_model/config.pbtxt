@@ -1,0 +1,48 @@
+name: "ensemble_model"
+platform: "ensemble"
+max_batch_size: 4096
+
+input [
+  {
+    name: "RAW_IMAGE"
+    data_type: TYPE_UINT8
+    dims: [-1]
+  }
+]
+
+output [
+  {
+    name: "output__0"
+    data_type: TYPE_FP32
+    dims: [ 5 ]  # Match classifier output dims
+  }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "preprocess"
+      model_version: -1
+      input_map {
+        key: "RAW_IMAGE"
+        value: "RAW_IMAGE"
+      }
+      output_map {
+        key: "PREPROCESSED_IMAGE"
+        value: "PREPROCESSED_IMAGE"
+      }
+    },
+    {
+      model_name: "classifier"
+      model_version: -1
+      input_map {
+        key: "input__0"
+        value: "PREPROCESSED_IMAGE"
+      }
+      output_map {
+        key: "output__0"
+        value: "output__0"
+      }
+    }
+  ]
+}

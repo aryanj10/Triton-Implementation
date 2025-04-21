@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+numpy
+tritonclient[all]
+python-multipart
+pyngrok

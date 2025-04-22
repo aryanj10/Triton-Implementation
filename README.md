@@ -56,13 +56,13 @@ The Repository structure depends on the model,
 ##### pytorch_libtorch 
 
 For a pytorch_libtorch model, organize your repository as:
-
+```protobuf
 models/
 └── classifier/
     ├── 1/
     │   └── model.pt
     └── config.pbtxt
-
+```
 
 ### config.pbtxt
 

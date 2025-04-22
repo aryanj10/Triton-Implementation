@@ -93,7 +93,7 @@ from tritonclient.grpc import InferInput, InferRequestedOutput
 
 # === Config ===
 TRITON_URL = "localhost:8001"
-MODEL_NAME = "ensemble_model"  # Ensemble: preprocessor + classifier
+MODEL_NAME = "ensemble_model"  # Ensemble: preprocessor + classifier #put in env
 IMAGE_DIR = "/home/aj3246/material/material_data/1"
 BATCH_SIZE = 1000
 INPUT_NAME = "RAW_IMAGE"
@@ -126,9 +126,6 @@ start = time.time()
 all_predictions = []
 
 
-all_predictions = []
-total_time = 0
-start = time.time()
 
 for i in tqdm(range(0, len(image_paths), BATCH_SIZE), desc="🔁 Sending batches"):
     batch_paths = image_paths[i:i + BATCH_SIZE]

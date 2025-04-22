@@ -66,6 +66,7 @@ models/
 
 ### config.pbtxt
 
+```protobuf
 name: "classifier" 
 platform: "pytorch_libtorch" # To tell which backend to use
 max_batch_size: 4096 # Maximum Batch Size to expect
@@ -103,7 +104,7 @@ output [ # Change this according to your model
 response_cache {  # Optional
   enable: true
 }
-
+```
 
 
 Run the following Docker command to start the Triton Inference Server on a specific GPU:

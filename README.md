@@ -236,8 +236,10 @@ docker run --gpus="device=1" --rm \
 ```
 To install with python libraries:
 ```bash
-docker run --gpus="device=3" --rm --shm-size=4g   -p 8000:8000 -p 8001:8001 -p 8002:8002   -v $(pwd)/models:/models   nvcr.io/nvidia/tritonserver:24.02-py3   bash -c "pip install numpy t
-orchvision opencv-python-headless && tritonserver --model-repository=/models"
+docker run --gpus="device=3" --rm --shm-size=4g \
+  -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+    -v $(pwd)/models:/models   nvcr.io/nvidia/tritonserver:24.02-py3  \
+     bash -c "pip install numpy torchvision opencv-python-headless && tritonserver --model-repository=/models" \
 ```
 
 Arguments Explained:

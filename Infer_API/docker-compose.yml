@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  fastapi_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${FASTAPI_PORT}:${FASTAPI_PORT}"
+    restart: unless-stopped
+    volumes:
+      - ./app:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TRITON_URL=triton:${TRITON_GRPC_PORT}
+    depends_on:
+      - triton
+
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.02-py3
+    runtime: nvidia
+    shm_size: ${SHM_SIZE}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+              device_ids: ["${GPU_ID}"]
+    ports:
+      - "${TRITON_HTTP_PORT}:8000"
+      - "${TRITON_GRPC_PORT}:8001"
+      - "${TRITON_METRICS_PORT}:8002"
+    volumes:
+      - ${MODEL_REPO}:/models
+    entrypoint: >
+      bash -c "pip install numpy torchvision opencv-python-headless && tritonserver --model-repository=/models"

@@ -1,0 +1,17 @@
+FASTAPI_PORT=8081
+TRITON_HTTP_PORT=8000
+TRITON_GRPC_PORT=8001
+TRITON_METRICS_PORT=8002
+
+# Hardware
+GPU_ID=3
+SHM_SIZE=4g
+
+# Triton core settings
+MODEL_REPO=./models
+MODEL_CONTROL_MODE=explicit  # or poll / none
+
+# Advanced Triton flags
+STRICT_MODEL_CONFIG=true
+LOG_VERBOSE=0
+RESPONSE_CACHE_ENABLE=true

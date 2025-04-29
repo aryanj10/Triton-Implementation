@@ -1,0 +1,22 @@
+name: "preprocessor_resnet"
+backend: "python"
+max_batch_size: 32
+input [
+  {
+    name: "image_id"
+    data_type: TYPE_STRING
+    dims: [1]
+  }
+]
+output [
+  {
+    name: "preprocessed_image"
+    data_type: TYPE_FP32
+    dims: [224, 224, 3]
+  }
+]
+instance_group [
+  {
+    kind: KIND_GPU
+  }
+]

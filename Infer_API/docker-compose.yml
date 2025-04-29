@@ -32,5 +32,6 @@ services:
       - "${TRITON_METRICS_PORT}:8002"
     volumes:
       - ${MODEL_REPO}:/models
+      - ./triton_requirements.txt:/opt/tritonserver/triton_requirements.txt  # <-- NEW line
     entrypoint: >
-      bash -c "pip install numpy torchvision opencv-python-headless && tritonserver --model-repository=/models"
+      bash -c "pip install --no-cache-dir -r /opt/tritonserver/triton_requirements.txt && tritonserver --model-repository=/models"

@@ -1,0 +1,126 @@
+import triton_python_backend_utils as pb_utils
+import numpy as np
+import json
+import cv2
+import torch
+import torchvision.transforms.v2 as transforms
+from pymongo import MongoClient
+import gridfs
+import os
+from bson import ObjectId
+from concurrent.futures import ThreadPoolExecutor
+import logging
+
+class TritonPythonModel:
+    def initialize(self, args):
+        self.model_config = json.loads(args["model_config"])
+
+        output_config = pb_utils.get_output_config_by_name(
+            self.model_config, "preprocessed_image"
+        )
+        self.output_dtype = pb_utils.triton_string_to_numpy(output_config["data_type"])
+
+        # Setup logging
+        self.logger = logging.getLogger('preprocessor_resnet')
+        self.logger.setLevel(logging.DEBUG)
+
+        # Console Handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+
+        formatter = logging.Formatter(
+            '[%(asctime)s] [%(levelname)s] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
+        self.logger.info("Preprocessor model initialized")
+
+        # MongoDB connection
+        self.mongo_host = "10.248.24.145"
+        self.mongo_port = 27017
+        self.username = "mongouser"
+        self.password = "password123"
+        self.auth_db = "admin"
+        self.db_name = "2022_materials_project_1"
+        self.collection_name = "dynamic_collection"
+
+        mongo_uri = f"mongodb://{self.username}:{self.password}@{self.mongo_host}:{self.mongo_port}/{self.auth_db}?authSource={self.auth_db}&retryWrites=true&w=majority"
+        self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        self.db = self.client[self.db_name]
+        self.fs = gridfs.GridFS(self.db)
+        self.collection = self.db[self.collection_name]
+
+        # Preprocessing pipeline
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224), antialias=True),
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.executor = ThreadPoolExecutor(max_workers=8)
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            input_id_tensor = pb_utils.get_input_tensor_by_name(request, "image_id")
+            image_id_str = input_id_tensor.as_numpy()[0][0].decode('utf-8')
+
+            try:
+                image_id_obj = ObjectId(image_id_str)
+                metadata_doc = self.collection.find_one({"_id": image_id_obj})
+
+                if metadata_doc is not None:
+                    gridfs_id = metadata_doc.get("file_id")
+                    if gridfs_id is None:
+                        self.logger.warning(f"Metadata found but no file_id for {image_id_str}. Trying image_id as file_id directly.")
+                        gridfs_id = image_id_obj
+                else:
+                    self.logger.warning(f"No metadata found for {image_id_str}. Treating image_id as file_id directly.")
+                    gridfs_id = image_id_obj
+
+                # Try to fetch the image
+                grid_out = self.fs.get(ObjectId(gridfs_id))
+                img_bytes = grid_out.read()
+
+                img_tensor = self._decode_opencv(img_bytes)
+                img_tensor = img_tensor.unsqueeze(0).to(self.device)
+
+                processed_tensor = self.transform(img_tensor)
+                processed_tensor = processed_tensor.permute(0, 2, 3, 1)  # NHWC
+                processed_tensor = processed_tensor.cpu().numpy()
+
+                output_tensor = pb_utils.Tensor("preprocessed_image", processed_tensor.astype(self.output_dtype))
+                responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
+
+                self.logger.info(f"Preprocessed image_id: {image_id_str} | mean: {processed_tensor.mean():.4f}, min: {processed_tensor.min():.4f}, max: {processed_tensor.max():.4f}")
+
+            except Exception as e:
+                self.logger.error(f"Exception during processing image_id {image_id_str}: {e}")
+                dummy_tensor = np.zeros((1, 224, 224, 3), dtype=np.float32)
+                output_tensor = pb_utils.Tensor("preprocessed_image", dummy_tensor)
+                responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
+
+        return responses
+
+    def _decode_opencv(self, img_bytes):
+        try:
+            img_np = np.frombuffer(img_bytes, dtype=np.uint8)
+            img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+            return img
+        except Exception as e:
+            self.logger.error(f"Error decoding image: {e}")
+            return torch.zeros((3, 224, 224), dtype=torch.float32)
+
+    def finalize(self):
+        self.logger.info("🛑 Preprocessing model unloaded")
+        self.executor.shutdown()

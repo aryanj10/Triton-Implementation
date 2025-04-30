@@ -173,8 +173,10 @@ async def infer_from_ids(request: ImageIDsRequest):
         latency_ms = round((end - start) * 1000, 2)
 
         return {
-            "image_ids": image_id_list,
-            "predictions": output_data.tolist(),
+            "predictions": {
+                img_id: embedding.tolist()
+                for img_id, embedding in zip(image_id_list, output_data)
+            },
             "timing_ms": latency_ms
         }
 

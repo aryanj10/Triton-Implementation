@@ -1,6 +1,6 @@
 name: "preprocessor_dino"
 backend: "python"
-max_batch_size: 32
+max_batch_size: 4096
 input [
   {
     name: "image_id"
@@ -20,3 +20,9 @@ instance_group [
     kind: KIND_GPU
   }
 ]
+
+
+dynamic_batching {
+  preferred_batch_size: [32, 64, 128, 256, 512, 1024]
+  max_queue_delay_microseconds: 100
+}

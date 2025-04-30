@@ -1,6 +1,6 @@
 name: "dino_model"
 platform: "pytorch_libtorch"
-max_batch_size: 128
+max_batch_size: 4096
 
 input [
   {
@@ -17,3 +17,20 @@ output [
     dims: [384]
   }
 ]
+
+
+response_cache {
+  enable: true
+}
+
+instance_group [
+  {
+    count: 2
+    kind: KIND_GPU
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [32, 64, 128, 256, 512, 1024]
+  max_queue_delay_microseconds: 100
+}

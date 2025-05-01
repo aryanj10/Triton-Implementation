@@ -1,0 +1,38 @@
+name: "dino_model_onnx"
+platform: "tensorrt_plan"
+max_batch_size: 1024
+
+
+input [
+  {
+    name: "INPUT__0"
+    data_type: TYPE_FP32
+    dims: [3, 224, 224]
+  }
+]
+
+output [
+  {
+    name: "OUTPUT__0"
+    data_type: TYPE_FP32
+    dims: [384]
+  }
+]
+
+
+response_cache {
+  enable: true
+}
+
+instance_group [
+  {
+    count: 5
+    kind: KIND_GPU
+    gpus: [0,1,2,3,4]
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [32, 64, 128, 256, 512, 1024]
+  max_queue_delay_microseconds: 100
+}

@@ -25,13 +25,21 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ["${GPU_ID}"]
+              device_ids: ["1", "2", "4", "6", "7"]
     ports:
       - "${TRITON_HTTP_PORT}:8000"
       - "${TRITON_GRPC_PORT}:8001"
       - "${TRITON_METRICS_PORT}:8002"
     volumes:
       - ${MODEL_REPO}:/models
-      - ./triton_requirements.txt:/opt/tritonserver/triton_requirements.txt  # <-- NEW line
+      - ./triton_requirements.txt:/opt/tritonserver/triton_requirements.txt
     entrypoint: >
       bash -c "pip install --no-cache-dir -r /opt/tritonserver/triton_requirements.txt && tritonserver --model-repository=/models"
+
+  build_engine:
+    image: nvcr.io/nvidia/tensorrt:24.02-py3
+    runtime: nvidia
+    volumes:
+      - ${MODEL_REPO}:/models
+    entrypoint: >
+      bash -c "trtexec --onnx=/models/dino_model_onnx/1/model.onnx --saveEngine=/models/dino_model_onnx/1/model.plan --minShapes=INPUT__0:1x3x224x224 --optShapes=INPUT__0:64x3x224x224 --maxShapes=INPUT__0:1024x3x224x224 --builderOptimizationLevel=5 --fp16"

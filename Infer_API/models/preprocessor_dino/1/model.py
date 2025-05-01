@@ -6,6 +6,7 @@ import torch
 import torchvision.transforms.v2 as transforms
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 class TritonPythonModel:
     def initialize(self, args):
@@ -25,7 +26,7 @@ class TritonPythonModel:
         self.logger.info("✅ DINOv2 Preprocessor initialized")
 
         # Image source API
-        self.api_url_base = "http://10.248.24.145:8000/api/get-image/"
+        self.api_url_base = "http://m3kube.urcf.drexel.edu:8079/api/get-image/"
 
         # DINOv2-specific preprocessing
         self.transform = transforms.Compose([
@@ -38,47 +39,45 @@ class TritonPythonModel:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     
+
+    def _safe_fetch_and_preprocess(self, image_id_str):
+        try:
+            img_bytes = self._fetch_image_from_api(image_id_str)
+            img_tensor = self._decode_opencv(img_bytes)
+            img_tensor = img_tensor.to(self.device)
+            return self.transform(img_tensor)
+        
+        except Exception as e:
+            self.logger.error(f"Error for {image_id_str}: {e}")
+            return torch.zeros((3, 224, 224), dtype=torch.float32)
+
     def execute(self, requests):
+        request = requests[0]
         responses = []
 
-        for request in requests:
-            try:
-                input_id_tensor = pb_utils.get_input_tensor_by_name(request, "image_id")
-                image_id_batch = input_id_tensor.as_numpy().squeeze(axis=1)  # shape: [batch_size]
+        try:
+            input_id_tensor = pb_utils.get_input_tensor_by_name(request, "image_id")
+            image_id_batch = input_id_tensor.as_numpy().squeeze(axis=1)
 
-                preprocessed_batch = []
+            # Decode bytes
+            image_ids = [id_bytes.decode("utf-8") for id_bytes in image_id_batch]
 
-                for image_id_bytes in image_id_batch:
-                    image_id_str = image_id_bytes.decode("utf-8")
+            # Fetch & preprocess in parallel
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                preprocessed_batch = list(executor.map(self._safe_fetch_and_preprocess, image_ids))
 
-                    try:
-                        img_bytes = self._fetch_image_from_api(image_id_str)
-                        img_tensor = self._decode_opencv(img_bytes)
-                        img_tensor = img_tensor.to(self.device)
-                        processed_tensor = self.transform(img_tensor)  # shape: [3, 224, 224]
-                        preprocessed_batch.append(processed_tensor)
+            batch_tensor = torch.stack(preprocessed_batch)
+            output_tensor = pb_utils.Tensor("preprocessed_image", batch_tensor.cpu().numpy())
+            responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
 
-                        self.logger.info(f"[{image_id_str}] Preprocessed | mean: {processed_tensor.mean():.4f}")
-
-                    except Exception as e:
-                        self.logger.error(f"Error for {image_id_str}: {e}")
-                        dummy_tensor = torch.zeros((3, 224, 224), dtype=torch.float32)
-                        preprocessed_batch.append(dummy_tensor)
-
-                # Stack and return one batched response
-                batch_tensor = torch.stack(preprocessed_batch)  # shape: [batch, 3, 224, 224]
-                output_tensor = pb_utils.Tensor(
-                    "preprocessed_image", batch_tensor.cpu().numpy()
-                )
-                responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
-
-            except Exception as e:
-                self.logger.error(f"Fatal request-level error: {e}")
-                dummy_tensor = np.zeros((len(requests), 3, 224, 224), dtype=np.float32)
-                output_tensor = pb_utils.Tensor("preprocessed_image", dummy_tensor)
-                responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
+        except Exception as e:
+            self.logger.error(f"❌ Fatal request error: {e}")
+            dummy_tensor = np.zeros((1, 3, 224, 224), dtype=np.float32)
+            output_tensor = pb_utils.Tensor("preprocessed_image", dummy_tensor)
+            responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
 
         return responses
+
 
     def _fetch_image_from_api(self, image_id):
         url = self.api_url_base + image_id

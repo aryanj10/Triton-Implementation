@@ -184,3 +184,40 @@ async def infer_from_ids(request: ImageIDsRequest):
         print(f"❌ Exception in /infer_from_ids_dino_json: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.post("/infer_from_ids_dino_onnx")
+async def infer_from_ids_onnx(request: ImageIDsRequest):
+    try:
+        start = time.time()
+
+        image_id_list = request.image_ids
+
+        model_name = "ensemble_dino_onnx"  # or "dino_model_onnx" if not using ensemble
+        input_name = "image_id"
+        output_name = "dino_embedding_vector"
+
+        encoded_ids = np.array([[img_id.encode("utf-8")] for img_id in image_id_list], dtype=object)
+        input_tensor = InferInput(input_name, [len(image_id_list), 1], "BYTES")
+        input_tensor.set_data_from_numpy(encoded_ids)
+
+        output_tensor = InferRequestedOutput(output_name)
+
+        response = client.infer(
+            model_name=model_name,
+            inputs=[input_tensor],
+            outputs=[output_tensor]
+        )
+
+        output_data = response.as_numpy(output_name)
+        latency_ms = round((time.time() - start) * 1000, 2)
+
+        return {
+            "predictions": {
+                img_id: embedding.tolist()
+                for img_id, embedding in zip(image_id_list, output_data)
+            },
+            "timing_ms": latency_ms
+        }
+
+    except Exception as e:
+        print(f"❌ Exception in /infer_from_ids_dino_onnx: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

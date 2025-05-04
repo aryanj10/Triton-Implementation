@@ -6,6 +6,7 @@ import torch
 import torchvision.transforms.v2 as transforms
 import requests
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 class TritonPythonModel:
@@ -28,7 +29,6 @@ class TritonPythonModel:
         # Image source API
         self.api_url_base = "http://m3kube.urcf.drexel.edu:8079/api/get-image/"
 
-        # DINOv2-specific preprocessing
         self.transform = transforms.Compose([
             transforms.Resize((224, 224), antialias=True),
             transforms.ToImage(),
@@ -37,38 +37,60 @@ class TritonPythonModel:
         ])
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    
 
     def _safe_fetch_and_preprocess(self, image_id_str):
+        timings = {}
         try:
+            t0 = time.time()
             img_bytes = self._fetch_image_from_api(image_id_str)
+            t1 = time.time()
             img_tensor = self._decode_opencv(img_bytes)
-            img_tensor = img_tensor.to(self.device)
-            return self.transform(img_tensor)
-        
+            t2 = time.time()
+            preprocessed = self.transform(img_tensor)
+            t3 = time.time()
+
+            timings["fetch"] = round(t1 - t0, 4)
+            timings["decode"] = round(t2 - t1, 4)
+            timings["transform"] = round(t3 - t2, 4)
+
+            return preprocessed, timings
+
         except Exception as e:
             self.logger.error(f"Error for {image_id_str}: {e}")
-            return torch.zeros((3, 224, 224), dtype=torch.float32)
+            return torch.zeros((3, 224, 224), dtype=torch.float32), {"error": str(e)}
 
     def execute(self, requests):
         request = requests[0]
         responses = []
 
         try:
+            total_start = time.time()
+
             input_id_tensor = pb_utils.get_input_tensor_by_name(request, "image_id")
             image_id_batch = input_id_tensor.as_numpy().squeeze(axis=1)
-
-            # Decode bytes
             image_ids = [id_bytes.decode("utf-8") for id_bytes in image_id_batch]
 
-            # Fetch & preprocess in parallel
+            # Parallel fetch and preprocess
             with ThreadPoolExecutor(max_workers=16) as executor:
-                preprocessed_batch = list(executor.map(self._safe_fetch_and_preprocess, image_ids))
+                results = list(executor.map(self._safe_fetch_and_preprocess, image_ids))
+
+            preprocessed_batch = []
+            fetch_times, decode_times, transform_times = [], [], []
+
+            for output, timing in results:
+                if isinstance(timing, dict):
+                    fetch_times.append(timing.get("fetch", 0))
+                    decode_times.append(timing.get("decode", 0))
+                    transform_times.append(timing.get("transform", 0))
+                preprocessed_batch.append(output)
 
             batch_tensor = torch.stack(preprocessed_batch)
             output_tensor = pb_utils.Tensor("preprocessed_image", batch_tensor.cpu().numpy())
             responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
+
+            total_time = round(time.time() - total_start, 4)
+            self.logger.info(f"✅ Batch size: {len(image_ids)} | Total time: {total_time}s")
+            self.logger.info(f"⏱ Avg fetch: {np.mean(fetch_times):.4f}s | decode: {np.mean(decode_times):.4f}s | transform: {np.mean(transform_times):.4f}s")
 
         except Exception as e:
             self.logger.error(f"❌ Fatal request error: {e}")
@@ -77,7 +99,6 @@ class TritonPythonModel:
             responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
 
         return responses
-
 
     def _fetch_image_from_api(self, image_id):
         url = self.api_url_base + image_id

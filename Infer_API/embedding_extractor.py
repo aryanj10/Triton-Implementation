@@ -18,7 +18,7 @@ print(f"🧹 Extracted {len(image_ids)} image IDs (Limiting for testing)")
 # 3. Setup inference
 headers = {"Content-Type": "application/json"}
 inference_url = "http://localhost:8081/infer_from_ids_dino_json"
-batch_size = 256
+batch_size = 128
 all_results = {}
 
 # 4. Send requests in batches

@@ -21,7 +21,7 @@ This guide walks through deploying an image classification pipeline using an ens
 
 
 ```mermaid
-flowchart TD
+flowchart LR
   subgraph CLIENT["CLIENT"]
     A["User Uploads Images via FastAPI"]
     B["FastAPI reads image bytes"]

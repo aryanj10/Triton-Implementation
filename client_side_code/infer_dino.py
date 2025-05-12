@@ -4,14 +4,16 @@ import numpy as np
 import tritonclient.grpc as grpcclient
 from tritonclient.grpc import InferInput, InferRequestedOutput
 from tqdm import tqdm
+import time
 
 TRITON_URL = "localhost:8001"
-MODEL_NAME = "ensemble_dino_onnx"
-INPUT_NAME = "raw_image"
-LENGTH_NAME = "image_length"
-OUTPUT_NAME = "dino_embedding_vector"
-BATCH_SIZE = 128
 IMAGE_DIR = "images"
+BATCH_SIZE = 128
+
+MODELS = [
+    {"name": "ensemble_dino_onnx", "output": "dino_embedding_vector"},
+    {"name": "ensemble_resnet_embed", "output": "resnet_embedding_vector"}
+]
 
 def load_image_bytes(path):
     with open(path, "rb") as f:
@@ -27,43 +29,60 @@ def prepare_batch(image_paths):
     batch_array = np.stack(padded_imgs).astype(np.uint8)  # shape = [B, N]
     return batch_array
 
-
-def infer_batch(client, batch_array):
-    infer_input = InferInput(INPUT_NAME, batch_array.shape, "UINT8")
+def infer_batch(client, model_name, output_name, batch_array):
+    infer_input = InferInput("raw_image", batch_array.shape, "UINT8")
     infer_input.set_data_from_numpy(batch_array)
-
-    infer_output = InferRequestedOutput(OUTPUT_NAME)
+    infer_output = InferRequestedOutput(output_name)
 
     results = client.infer(
-        model_name=MODEL_NAME,
+        model_name=model_name,
         inputs=[infer_input],
         outputs=[infer_output]
     )
-
-    return results.as_numpy(OUTPUT_NAME)
-
+    return results.as_numpy(output_name)
 
 def run_inference(image_dir):
     image_paths = sorted([
         os.path.join(image_dir, f)
         for f in os.listdir(image_dir)
-        if f.endswith(('.jpg', '.png', '.jpeg'))
+        if f.lower().endswith(('.jpg', '.png', '.jpeg'))
     ])
+    
+    timings = {}
+    all_predictions = {}
 
-    predictions = []
     with grpcclient.InferenceServerClient(TRITON_URL) as client:
-        for i in tqdm(range(0, len(image_paths), BATCH_SIZE), desc="🔁 Sending Batches"):
-            batch_paths = image_paths[i:i + BATCH_SIZE]
-            batch_array = prepare_batch(batch_paths)
-            embeddings = infer_batch(client, batch_array)
+        for model in MODELS:
+            model_name = model["name"]
+            output_name = model["output"]
+            predictions = []
+            start_time = time.time()
 
+            for i in tqdm(range(0, len(image_paths), BATCH_SIZE), desc=f"🔁 {model_name}"):
+                batch_paths = image_paths[i:i + BATCH_SIZE]
+                batch_array = prepare_batch(batch_paths)
+                embeddings = infer_batch(client, model_name, output_name, batch_array)
+                for path, emb in zip(batch_paths, embeddings):
+                    predictions.append((os.path.basename(path), emb))
 
-            for path, emb in zip(batch_paths, embeddings):
-                predictions.append((os.path.basename(path), emb))
-    return predictions
+            elapsed = time.time() - start_time
+            timings[model_name] = round(elapsed, 2)
+            all_predictions[model_name] = predictions
 
-# Usage
+    return timings, all_predictions
+
+# Run and compare
 if __name__ == "__main__":
-    results = run_inference(IMAGE_DIR)
-    for fname, emb in results[:5]:
-        print(f"{fname}: {emb[:5]}...")  # Print first 5 values of embedding
+    timings, results = run_inference(IMAGE_DIR)
+
+    print("\n⏱️ Inference Timings:")
+    for model, t in timings.items():
+        print(f"  {model}: {t}s")
+
+    print("\n📌 First 5 results from ResNet:")
+    for fname, emb in results["ensemble_resnet_embed"][:5]:
+        print(f"{fname}: {emb[:5]}...")
+
+    print("\n📌 First 5 results from DINO:")
+    for fname, emb in results["ensemble_dino_onnx"][:5]:
+        print(f"{fname}: {emb[:5]}...")

@@ -1,0 +1,48 @@
+name: "ensemble_resnet_embed"
+platform: "ensemble"
+max_batch_size: 1024
+
+input [
+  {
+    name: "raw_image"
+    data_type: TYPE_UINT8
+    dims: [-1]
+  }
+]
+
+output [
+  {
+    name: "resnet_embedding_vector"
+    data_type: TYPE_FP32
+    dims: [2048]
+  }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "preprocessor_resnet_embed"
+      model_version: -1
+      input_map {
+        key: "raw_image"
+        value: "raw_image"
+      }
+      output_map {
+        key: "preprocessed_image"
+        value: "preprocessed_image"
+      }
+    },
+    {
+      model_name: "resnet50_embed"
+      model_version: -1
+      input_map {
+        key: "input"
+        value: "preprocessed_image"
+      }
+      output_map {
+        key: "embedding"
+        value: "resnet_embedding_vector"
+      }
+    }
+  ]
+}

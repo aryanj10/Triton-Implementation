@@ -3,9 +3,9 @@ backend: "python"
 max_batch_size: 4096
 input [
   {
-    name: "image_id"
-    data_type: TYPE_STRING
-    dims: [1]
+    name: "raw_image"
+    data_type: TYPE_UINT8
+    dims: [ -1 ]
   }
 ]
 output [

@@ -25,7 +25,7 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-              device_ids: ["1", "2", "4", "6", "7"]
+              device_ids: ["1", "2", "0", "4"]
     ports:
       - "${TRITON_HTTP_PORT}:8000"
       - "${TRITON_GRPC_PORT}:8001"

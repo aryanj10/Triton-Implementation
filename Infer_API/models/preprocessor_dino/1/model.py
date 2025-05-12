@@ -4,7 +4,6 @@ import json
 import cv2
 import torch
 import torchvision.transforms.v2 as transforms
-import requests
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,18 +16,16 @@ class TritonPythonModel:
 
         # Logger
         self.logger = logging.getLogger('preprocessor_dino')
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)
         formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
 
         self.logger.info("✅ DINOv2 Preprocessor initialized")
 
-        # Image source API
-        self.api_url_base = "http://m3kube.urcf.drexel.edu:8079/api/get-image/"
-
+        # Preprocessing
         self.transform = transforms.Compose([
             transforms.Resize((224, 224), antialias=True),
             transforms.ToImage(),
@@ -37,27 +34,7 @@ class TritonPythonModel:
         ])
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def _safe_fetch_and_preprocess(self, image_id_str):
-        timings = {}
-        try:
-            t0 = time.time()
-            img_bytes = self._fetch_image_from_api(image_id_str)
-            t1 = time.time()
-            img_tensor = self._decode_opencv(img_bytes)
-            t2 = time.time()
-            preprocessed = self.transform(img_tensor)
-            t3 = time.time()
-
-            timings["fetch"] = round(t1 - t0, 4)
-            timings["decode"] = round(t2 - t1, 4)
-            timings["transform"] = round(t3 - t2, 4)
-
-            return preprocessed, timings
-
-        except Exception as e:
-            self.logger.error(f"Error for {image_id_str}: {e}")
-            return torch.zeros((3, 224, 224), dtype=torch.float32), {"error": str(e)}
+        self.executor = ThreadPoolExecutor(max_workers=8)  # for decoding in parallel
 
     def execute(self, requests):
         request = requests[0]
@@ -66,51 +43,51 @@ class TritonPythonModel:
         try:
             total_start = time.time()
 
-            input_id_tensor = pb_utils.get_input_tensor_by_name(request, "image_id")
-            image_id_batch = input_id_tensor.as_numpy().squeeze(axis=1)
-            image_ids = [id_bytes.decode("utf-8") for id_bytes in image_id_batch]
+            input_tensor = pb_utils.get_input_tensor_by_name(request, "raw_image")
+            image_byte_array = input_tensor.as_numpy()  # shape: [B, N]
 
-            # Parallel fetch and preprocess
-            with ThreadPoolExecutor(max_workers=16) as executor:
-                results = list(executor.map(self._safe_fetch_and_preprocess, image_ids))
+            decode_start = time.time()
 
+            # Parallel decode
+            decoded_imgs = list(self.executor.map(
+                self._safe_decode, [img.tobytes() for img in image_byte_array]
+            ))
+            decode_end = time.time()
+
+            transform_start = time.time()
             preprocessed_batch = []
-            fetch_times, decode_times, transform_times = [], [], []
-
-            for output, timing in results:
-                if isinstance(timing, dict):
-                    fetch_times.append(timing.get("fetch", 0))
-                    decode_times.append(timing.get("decode", 0))
-                    transform_times.append(timing.get("transform", 0))
-                preprocessed_batch.append(output)
+            for img in decoded_imgs:
+                preprocessed_batch.append(self.transform(img.to(self.device)))
+            transform_end = time.time()
 
             batch_tensor = torch.stack(preprocessed_batch)
             output_tensor = pb_utils.Tensor("preprocessed_image", batch_tensor.cpu().numpy())
             responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
 
-            total_time = round(time.time() - total_start, 4)
-            self.logger.info(f"✅ Batch size: {len(image_ids)} | Total time: {total_time}s")
-            self.logger.info(f"⏱ Avg fetch: {np.mean(fetch_times):.4f}s | decode: {np.mean(decode_times):.4f}s | transform: {np.mean(transform_times):.4f}s")
+            self.logger.info(f"✅ Batch size: {len(preprocessed_batch)} | Total time: {round(time.time() - total_start, 4)}s")
+            self.logger.info(f"⏱ Avg decode: {(decode_end - decode_start)/len(preprocessed_batch):.4f}s | transform: {(transform_end - transform_start)/len(preprocessed_batch):.4f}s")
 
         except Exception as e:
-            self.logger.error(f"❌ Fatal request error: {e}")
+            self.logger.error(f"❌ Fatal error in execute: {e}")
             dummy_tensor = np.zeros((1, 3, 224, 224), dtype=np.float32)
             output_tensor = pb_utils.Tensor("preprocessed_image", dummy_tensor)
             responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
 
         return responses
 
-    def _fetch_image_from_api(self, image_id):
-        url = self.api_url_base + image_id
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        return response.content
-
-    def _decode_opencv(self, img_bytes):
-        img_np = np.frombuffer(img_bytes, dtype=np.uint8)
-        img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+    def _safe_decode(self, img_bytes):
+        try:
+            img_np = np.frombuffer(img_bytes, dtype=np.uint8)
+            img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError("OpenCV failed to decode image")
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+        except Exception as e:
+            self.logger.error(f"❌ Decode error: {e}")
+            return torch.zeros((3, 224, 224), dtype=torch.float32)
 
     def finalize(self):
         self.logger.info("Preprocessor unloaded")
+        self.executor.shutdown()
+        self.logger.info("✅ DINOv2 Preprocessor finalized")

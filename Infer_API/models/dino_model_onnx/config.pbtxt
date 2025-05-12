@@ -26,9 +26,9 @@ response_cache {
 
 instance_group [
   {
-    count: 5
+    count: 2
     kind: KIND_GPU
-    gpus: [0,1,2,3,4]
+    gpus: [0,1,2,3]
   }
 ]
 

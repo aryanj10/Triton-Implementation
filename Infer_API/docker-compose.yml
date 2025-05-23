@@ -51,3 +51,4 @@ services:
       - ${MODEL_REPO}:/models
     entrypoint: >
        bash -c "trtexec --onnx=/models/resnet50_embed/1/resnet50_embed.onnx --saveEngine=/models/resnet50_embed/1/model.plan --minShapes=input:1x3x224x224 --optShapes=input:64x3x224x224 --maxShapes=input:1024x3x224x224 --builderOptimizationLevel=5 --fp16"
+

@@ -8,7 +8,7 @@ import time
 
 TRITON_URL = "localhost:8001"
 IMAGE_DIR = "images"
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 
 MODELS = [
     {"name": "ensemble_dino_onnx", "output": "dino_embedding_vector"},
